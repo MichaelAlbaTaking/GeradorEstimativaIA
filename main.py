@@ -14,7 +14,7 @@ from reportlab.lib.units import mm
 from PIL import Image
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Estimador de Projetos IA Sênior", layout="wide")
+st.set_page_config(page_title="Estimador de Projetos IA", layout="wide")
 
 # --- TEMPLATE YAML PADRÃO ---
 DEFAULT_CONFIG = """
@@ -271,7 +271,7 @@ with st.sidebar:
     yaml_input = st.text_area("Template YAML", value=st.session_state.yaml_config, height=350)
     st.session_state.yaml_config = yaml_input
 
-st.title("🚀 Estimador Técnico IA Sênior")
+st.title("🚀 Estimador de Projetos IA")
 c1, c2 = st.columns([1, 1.2])
 
 with c1:
