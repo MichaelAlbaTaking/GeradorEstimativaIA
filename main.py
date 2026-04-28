@@ -12,9 +12,10 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.lib.units import mm
 from PIL import Image
+from docx import Document
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Estimador de Projetos IA", layout="wide")
+st.set_page_config(page_title="Estimador de Projetos IA Sênior", layout="wide")
 
 # --- TEMPLATE YAML PADRÃO ---
 DEFAULT_CONFIG = """
@@ -44,6 +45,7 @@ regras_negocio:
     - se: "Documentação técnica escassa"
       adicionar_horas: 20
   complexidade:
+    muito_baixa: 0.5
     baixa: 1.0
     media: 1.5
     alta: 2.0
@@ -56,6 +58,9 @@ regras_negocio:
     autenticacao_seguranca: 12
     integracao_banco_api: 24
     exportacao_relatorio_pdf: 8
+    manutencao_alteracao_campo: 2
+    ajuste_simples_layout: 4
+    correcao_bug_simples: 4
   distribuicao_esforco:
     "Arquiteto de Software": 0.15
     "Desenvolvedor Fullstack": 0.55
@@ -78,6 +83,10 @@ def extract_text_from_file(uploaded_file):
                 text += page.extract_text() or ""
         elif uploaded_file.type == "text/plain":
             text = uploaded_file.read().decode("utf-8")
+        elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+            doc = Document(uploaded_file)
+            for para in doc.paragraphs:
+                text += para.text + "\n"
     except Exception as e:
         st.error(f"Erro ao extrair texto: {e}")
     return text
@@ -102,6 +111,13 @@ def call_openrouter(api_key, prompt, yaml_config_str):
     2. Use EXCLUSIVAMENTE os valores da 'tabela_esforco_base'.
     3. Atribua cada atividade ao perfil correto: {cargos}.
     4. Aplique multiplicadores técnicos sobre as horas de cada tarefa se necessário.
+    **Regra de Manutenção (PRIORIDADE MÁXIMA):** Se o documento indicar claramente que a 
+    funcionalidade/API já existe e requer apenas uma alteração, troca de campo, correção ou
+     ajuste (ex: 'só troca a informação'), você DEVE obrigatoriamente classificar o esforço utilizando 
+     os itens de baixo custo da 'tabela_esforco_base' (ex: 'manutencao_alteracao_campo' = 2h). É EXPRESSAMENTE 
+     PROIBIDO cobrar horas de desenvolvimento de uma nova 'integracao_banco_api' para endpoints que já existem. 
+     Além disso, aplique a complexidade 'muito_baixa' (0.5).
+     Obrigatorio Tudo que for criado ou alterado, ser testado por um QA
 
     ESTRUTURA OBRIGATÓRIA DO JSON DE SAÍDA:
     {{
@@ -145,12 +161,12 @@ def call_openrouter(api_key, prompt, yaml_config_str):
             perfil = ativ.get("perfil")
             if perfil in invest_perfil:
                 h = math.ceil(float(ativ.get("horas", 0)))
-                ativ["horas"] = h # Atualiza para o arredondado
+                ativ["horas"] = h 
                 invest_perfil[perfil]["horas_base"] += h
         
         subtotal = 0
         for cargo, info in invest_perfil.items():
-            info["total_horas"] = info["horas_base"] + info["horas_extras"] # Horas extras não são geradas pela IA neste fluxo, mas mantidas para compatibilidade
+            info["total_horas"] = info["horas_base"] + info["horas_extras"]
             info["custo_total"] = info["total_horas"] * custos_map.get(cargo, 0)
             subtotal += info["custo_total"]
             
@@ -161,9 +177,8 @@ def call_openrouter(api_key, prompt, yaml_config_str):
             "total_geral": subtotal + (subtotal * margem_pct)
         }
             
-        # Fallbacks para chaves de texto e listas que a IA pode esquecer
         data.setdefault("resumo_entendimento", "Resumo não disponível.")
-        data.setdefault("memoria_calculo_e_gaps", "Memória de cálculo e análise de gaps não disponível.")
+        data.setdefault("memoria_calculo_e_gaps", "Não disponível.")
         data.setdefault("atividades_detalhadas", [])
         data.setdefault("cronograma_semanas", [])
         data.setdefault("perguntas_clarificacao", [])
@@ -195,7 +210,6 @@ def generate_pdf(data, metadata, logo=None):
     elements.append(Paragraph(f"PROPOSTA TÉCNICA: {metadata.get('projeto')}", styles['Title']))
     elements.append(Paragraph(f"Cliente: {metadata.get('cliente')}", styles['Heading2']))
     
-    # 1. Resumo e Memória
     elements.append(Paragraph("1. Resumo do Entendimento", styles['Heading3']))
     elements.append(Paragraph(str(data.get('resumo_entendimento', '')), content_style))
     
@@ -203,7 +217,6 @@ def generate_pdf(data, metadata, logo=None):
     memoria_txt = str(data.get('memoria_calculo_e_gaps', '')).replace('\n', '<br/>')
     elements.append(Paragraph(memoria_txt, content_style))
 
-    # 3. Atividades Detalhadas
     elements.append(Paragraph("3. Detalhamento de Atividades", styles['Heading3']))
     ativ_data = [["Perfil", "Atividade", "Horas"]]
     for a in data.get('atividades_detalhadas', []):
@@ -214,7 +227,6 @@ def generate_pdf(data, metadata, logo=None):
     elements.append(at)
     elements.append(Spacer(1, 8*mm))
 
-    # 4. Investimento
     elements.append(Paragraph("4. Investimento por Perfil", styles['Heading3']))
     inv_data = [["Perfil", "H. Base", "H. Extras", "Total", "Custo Total"]]
     for i in data.get('investimento_por_perfil', []):
@@ -229,7 +241,6 @@ def generate_pdf(data, metadata, logo=None):
     it.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#1F4E79")), ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke), ('GRID', (0, 0), (-1, -1), 0.5, colors.grey), ('ALIGN', (0, 0), (-1, -1), 'CENTER'), ('BACKGROUND', (0, -1), (-1, -1), colors.lightgrey), ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold')]))
     elements.append(it)
     
-    # 5. Cronograma
     elements.append(Spacer(1, 10*mm))
     elements.append(Paragraph("5. Cronograma por Semanas", styles['Heading3']))
     cron_data = [["Período", "Foco", "Responsáveis"]]
@@ -239,25 +250,6 @@ def generate_pdf(data, metadata, logo=None):
     st_table = Table(cron_data, colWidths=[30*mm, 90*mm, 55*mm])
     st_table.setStyle(TableStyle([('GRID', (0, 0), (-1, -1), 0.5, colors.grey), ('VALIGN', (0, 0), (-1, -1), 'TOP'), ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey)]))
     elements.append(st_table)
-
-    # 6. Perguntas de Clarificação
-    elements.append(Spacer(1, 10*mm))
-    elements.append(Paragraph("6. Perguntas de Clarificação", styles['Heading3']))
-    if data.get('perguntas_clarificacao'):
-        for i, p in enumerate(data['perguntas_clarificacao']):
-            elements.append(Paragraph(f"• {p}", content_style))
-    else:
-        elements.append(Paragraph("Nenhuma pergunta de clarificação identificada.", content_style))
-
-    # 7. Riscos Identificados
-    elements.append(Spacer(1, 10*mm))
-    elements.append(Paragraph("7. Riscos Potenciais", styles['Heading3']))
-    if data.get('riscos_identificados'):
-        for i, r in enumerate(data['riscos_identificados']):
-            elements.append(Paragraph(f"• {r}", content_style))
-    else:
-        elements.append(Paragraph("Nenhum risco significativo identificado.", content_style))
-
 
     doc.build(elements)
     buffer.seek(0)
@@ -271,13 +263,13 @@ with st.sidebar:
     yaml_input = st.text_area("Template YAML", value=st.session_state.yaml_config, height=350)
     st.session_state.yaml_config = yaml_input
 
-st.title("🚀 Estimador de Projetos IA")
+st.title("🚀 Estimador Técnico IA")
 c1, c2 = st.columns([1, 1.2])
 
 with c1:
     cliente = st.text_input("Cliente")
     projeto = st.text_input("Projeto")
-    arquivo = st.file_uploader("Documento de Escopo", type=["pdf", "txt"])
+    arquivo = st.file_uploader("Documento de Escopo (PDF, TXT, DOCX)", type=["pdf", "txt", "docx"])
     if st.button("Gerar Proposta Completa ✨", type="primary"):
         if not api_key or not arquivo: st.error("Faltam dados!")
         else:
@@ -303,7 +295,7 @@ with c2:
         with tab2:
             st.write("### Decomposição de Atividades")
             st.table(res.get('atividades_detalhadas', []))
-            st.write("#### Memória de Cálculo")
+            st.write("#### Memória de Cálculo e Gaps")
             st.info(res.get('memoria_calculo_e_gaps'))
 
         with tab3:
