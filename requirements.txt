@@ -1,0 +1,7 @@
+streamlit
+openai
+httpx
+PyPDF2
+reportlab
+PyYAML
+Pillow
